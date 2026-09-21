@@ -1,0 +1,7 @@
+{
+  "name": "3D Robotic Hand & ML Simulator",
+  "description": "Hệ thống mô phỏng 3D bàn tay robot sinh học (Biomimetic Hand) với lớp da Hologram bao bọc khung xương, tối ưu thao tác vật thể và pipeline Machine Learning đa phương thức.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

@@ -1,0 +1,38 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'JetBrains Mono', monospace;
+    background-color: #04060c;
+    color: #cbd5e1;
+  }
+  h1, h2, h3, h4, .brand-font {
+    font-family: 'Chakra Petch', sans-serif;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(4, 6, 12, 0.6);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(46, 230, 200, 0.25);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(46, 230, 200, 0.45);
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.8; filter: drop-shadow(0 0 8px rgba(46, 230, 200, 0.4)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 16px rgba(46, 230, 200, 0.8)); }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 2.5s infinite ease-in-out;
+}
+
