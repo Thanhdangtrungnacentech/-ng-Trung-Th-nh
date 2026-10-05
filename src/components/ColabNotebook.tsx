@@ -378,6 +378,47 @@ export const COLAB_CELLS: NotebookCell[] = [
     targetPose: { thumb: 0.2, index: 0.15, middle: 0.12, ring: 0.15, pinky: 0.2 },
     forceValue: 2.0,
     pressureValue: 10.0
+  },
+  {
+    id: 14,
+    stageId: 'optimization_audit',
+    title: 'Kiểm Thử Tối Ưu Bão Hòa & Đánh Giá % Cải Tiến / % Kéo Lùi',
+    code: [
+      '# Kiểm định vòng lặp tối ưu hóa liên tục 7 chu kỳ đến giới hạn bão hòa',
+      'rounds_data = [',
+      '    {"round": "R0 Baseline", "test_acc": 0.8667, "roc_auc": 0.5000, "fn": 4, "latency_ms": 0.1, "flash_kb": 1.2, "status": "Baseline"},',
+      '    {"round": "R1 Linear L2", "test_acc": 0.8667, "roc_auc": 0.6429, "fn": 4, "latency_ms": 0.4, "flash_kb": 3.5, "status": "Cải tiến nhẹ"},',
+      '    {"round": "R2 Deep Tree", "test_acc": 0.8333, "roc_auc": 0.7857, "fn": 1, "latency_ms": 6.8, "flash_kb": 48.0, "status": "⚠️ KÉO LÙI (Overfit)"},',
+      '    {"round": "R3 Pruned Reg", "test_acc": 0.9333, "roc_auc": 0.8571, "fn": 0, "latency_ms": 2.1, "flash_kb": 14.8, "status": "Bước nhảy vọt"},',
+      '    {"round": "R4 Multimodal", "test_acc": 0.9667, "roc_auc": 0.9643, "fn": 0, "latency_ms": 2.6, "flash_kb": 22.4, "status": "Tối ưu cấp cao"},',
+      '    {"round": "R5 Pareto Best", "test_acc": 0.9667, "roc_auc": 0.9780, "fn": 0, "latency_ms": 1.6, "flash_kb": 8.6, "status": "🏆 ĐỈNH BÃO HÒA"},',
+      '    {"round": "R6 Over-Opt", "test_acc": 0.9333, "roc_auc": 0.9410, "fn": 1, "latency_ms": 28.5, "flash_kb": 340.0, "status": "⛔ KÉO LÙI NẶNG"}',
+      ']',
+      'df_audit = pd.DataFrame(rounds_data)',
+      'baseline_acc = df_audit.loc[0, "test_acc"]',
+      'df_audit["pct_gain_acc"] = ((df_audit["test_acc"] - baseline_acc) / baseline_acc * 100).round(2)',
+      'print("=== BÁO CÁO TIẾN TRÌNH CẢI TIẾN VS KÉO LÙI QUA 7 VÒNG TỐI ƯU ===")',
+      'print(df_audit.to_string(index=False))',
+      'print("\\n✓ Cải tiến tối đa tại R5: +11.54% Accuracy, +95.60% ROC-AUC, 100% FN Reduction, 1.6ms Latency")',
+      'print("⚠ Kéo lùi khi ép quá ngưỡng R6: Tụt -3.45% Accuracy, độ trễ nổ tung +1681%, Flash phình +3853%!")'
+    ],
+    output: [
+      '=== BÁO CÁO TIẾN TRÌNH CẢI TIẾN VS KÉO LÙI QUA 7 VÒNG TỐI ƯU ===',
+      '       round  test_acc  roc_auc  fn  latency_ms  flash_kb               status  pct_gain_acc',
+      ' R0 Baseline    0.8667   0.5000   4         0.1       1.2             Baseline          0.00',
+      'R1 Linear L2    0.8667   0.6429   4         0.4       3.5         Cải tiến nhẹ          0.00',
+      ' R2 Deep Tree   0.8333   0.7857   1         6.8      48.0 ⚠️ KÉO LÙI (Overfit)         -3.85',
+      'R3 Pruned Reg   0.9333   0.8571   0         2.1      14.8        Bước nhảy vọt         +7.68',
+      'R4 Multimodal   0.9667   0.9643   0         2.6      22.4       Tối ưu cấp cao        +11.54',
+      'R5 Pareto Best  0.9667   0.9780   0         1.6       8.6      🏆 ĐỈNH BÃO HÒA        +11.54',
+      '  R6 Over-Opt   0.9333   0.9410   1        28.5     340.0       ⛔ KÉO LÙI NẶNG         +7.68',
+      '✓ CẢI TIẾN TỐI ĐA TẠI R5: +11.54% Accuracy | +95.60% ROC-AUC | Triệt tiêu 100% lỗi FN (0 lỗi) | Độ trễ 1.6ms',
+      '⚠ KÉO LÙI KHI ÉP QUÁ NGƯỠNG (R6): Tụt -3.45% Accuracy | Độ trễ nổ tung 28.5ms (+1681%) | Flash phình 340KB (+3853%)!'
+    ],
+    executionTime: '1.1s',
+    targetPose: { thumb: 0.95, index: 0.92, middle: 0.90, ring: 0.88, pinky: 0.85 },
+    forceValue: 31.0,
+    pressureValue: 195.0
   }
 ];
 
@@ -391,7 +432,7 @@ export const ColabNotebook: React.FC<ColabNotebookProps> = ({
   const [currentCellIndex, setCurrentCellIndex] = useState<number>(-1);
   const [running, setRunning] = useState<boolean>(false);
   const [completedCells, setCompletedCells] = useState<Set<number>>(new Set());
-  const autoRunTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoRunTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Execute a specific cell
   const executeCell = async (cellIndex: number) => {
@@ -430,7 +471,7 @@ export const ColabNotebook: React.FC<ColabNotebookProps> = ({
         autoRunTimerRef.current = setTimeout(runNext, 1800);
       } else {
         setRunning(false);
-        onLogMessage('Hoàn tất toàn bộ 13 Cell Pipeline Machine Learning!', 'success');
+        onLogMessage('Hoàn tất toàn bộ 14 Cell Pipeline Machine Learning & Kiểm Thử Tối Ưu Bão Hòa!', 'success');
       }
     };
 

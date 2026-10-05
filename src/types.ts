@@ -145,6 +145,48 @@ export interface ModelMetrics {
   };
 }
 
+export interface OptimizationRound {
+  round: number;
+  id: string;
+  name: string;
+  method: string;
+  description: string;
+  testAccuracy: number;
+  trainAccuracy: number;
+  generalizationGap: number;
+  f1Score: number;
+  rocAuc: number;
+  falseNegatives: number;
+  latencyMs: number;
+  flashSizeKb: number;
+  powerMa: number;
+  noiseResiliencePct: number;
+  status: 'baseline' | 'improved' | 'plateau' | 'regressed';
+  statusBadge: string;
+  gainSummary: string;
+  regressionSummary: string;
+  relativeGainAccuracyPct: number;
+  relativeGainF1Pct: number;
+  relativeGainRocAucPct: number;
+  relativeLatencyChangePct: number;
+  relativeFlashChangePct: number;
+  relativePowerChangePct: number;
+  keyImprovements: string[];
+  keyRegressions: string[];
+}
+
+export interface OptimizationComparisonDiff {
+  metricKey: string;
+  metricLabel: string;
+  unit: string;
+  fromVal: number;
+  toVal: number;
+  absoluteDiff: number;
+  percentageDiff: number;
+  isPositiveForUser: boolean;
+  category: 'performance' | 'hardware_efficiency' | 'safety';
+}
+
 export interface NotebookCell {
   id: number;
   stageId: string;

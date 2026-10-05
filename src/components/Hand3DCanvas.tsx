@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { JointAngles, RenderMode, GraspObjectType, HologramConfig, ManipulationAction, ManipulationStatus } from '../types';
+import { HapticFeedbackOverlay } from './HapticFeedbackOverlay';
 import {
   Eye,
   RotateCw,
@@ -28,7 +29,10 @@ import {
   Pause,
   Zap,
   Lock,
-  ArrowDown
+  ArrowDown,
+  CircleDot,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface Hand3DCanvasProps {
@@ -97,14 +101,50 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
     group: THREE.Group;
     ring: THREE.Mesh;
     disc: THREE.Mesh;
+    pulseRing1: THREE.Mesh;
+    pulseRing2: THREE.Mesh;
     arrow: THREE.ArrowHelper;
     cone: THREE.Mesh;
     fingerId: string;
   }[]>([]);
 
+  const fingertipPressureRingsRef = useRef<{
+    fingerId: string;
+    group: THREE.Group;
+    innerDisc: THREE.Mesh;
+    baseRing: THREE.Mesh;
+    pulseRing1: THREE.Mesh;
+    pulseRing2: THREE.Mesh;
+    reticleRing: THREE.Mesh;
+  }[]>([]);
+
   const [autoRotate, setAutoRotate] = useState(false);
   const [showSliders, setShowSliders] = useState(false);
   const [showForceVectors, setShowForceVectors] = useState(true);
+  const [showHapticHUD, setShowHapticHUD] = useState(true);
+  const [showPressureRings, setShowPressureRings] = useState<boolean>(true);
+  const [isPressureHUDCollapsed, setIsPressureHUDCollapsed] = useState<boolean>(false);
+
+  const showPressureRingsRef = useRef<boolean>(true);
+  useEffect(() => {
+    showPressureRingsRef.current = showPressureRings;
+  }, [showPressureRings]);
+
+  const jointAnglesRef = useRef<JointAngles>(jointAngles);
+  useEffect(() => {
+    jointAnglesRef.current = jointAngles;
+  }, [jointAngles]);
+
+  const forceNRef = useRef<number>(forceN);
+  useEffect(() => {
+    forceNRef.current = forceN;
+  }, [forceN]);
+
+  const pressureKPaRef = useRef<number>(pressureKPa);
+  useEffect(() => {
+    pressureKPaRef.current = pressureKPa;
+  }, [pressureKPa]);
+
   const [graspObject, setGraspObject] = useState<GraspObjectType>(currentGraspObject);
   const [currentMode, setCurrentMode] = useState<RenderMode>(renderMode);
   const [camView, setCamView] = useState<'wide' | 'iso' | 'front' | 'side' | 'top'>('wide');
@@ -113,6 +153,16 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
   // Dynamic Reach-and-Grasp Timeline & Auto-Play Loop State
   const [graspTimelinePct, setGraspTimelinePct] = useState<number>(0);
   const [isAutoGraspPlaying, setIsAutoGraspPlaying] = useState<boolean>(false);
+
+  const graspTimelinePctRef = useRef<number>(graspTimelinePct);
+  useEffect(() => {
+    graspTimelinePctRef.current = graspTimelinePct;
+  }, [graspTimelinePct]);
+
+  const graspObjectRef = useRef<GraspObjectType>(graspObject);
+  useEffect(() => {
+    graspObjectRef.current = graspObject;
+  }, [graspObject]);
 
   // Biomimetic Holographic Skin Settings
   const [hologramConfig, setHologramConfig] = useState<HologramConfig>({
@@ -365,6 +415,27 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
         const discMesh = new THREE.Mesh(discGeo, discMat);
         patchGroup.add(discMesh);
 
+        // Haptic Feedback Expanding Pulse Shockwave Rings
+        const pulseRingGeo1 = new THREE.RingGeometry(0.038, 0.058, 24);
+        const pulseRingMat1 = new THREE.MeshBasicMaterial({
+          color: 0x2ee6c8,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.65
+        });
+        const pulseRing1 = new THREE.Mesh(pulseRingGeo1, pulseRingMat1);
+        patchGroup.add(pulseRing1);
+
+        const pulseRingGeo2 = new THREE.RingGeometry(0.042, 0.062, 24);
+        const pulseRingMat2 = new THREE.MeshBasicMaterial({
+          color: 0x2ee6c8,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.45
+        });
+        const pulseRing2 = new THREE.Mesh(pulseRingGeo2, pulseRingMat2);
+        patchGroup.add(pulseRing2);
+
         // Normal Force Vector Arrow Helper (shooting out along normal)
         const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, 0.01), 0.28, 0x2ee6c8, 0.07, 0.04);
         patchGroup.add(arrow);
@@ -389,6 +460,8 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
           group: patchGroup,
           ring: ringMesh,
           disc: discMesh,
+          pulseRing1,
+          pulseRing2,
           arrow,
           cone: coneMesh,
           fingerId: cDef.id
@@ -900,6 +973,7 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
     ];
 
     const fingerGroups: Record<string, FingerMeshGroup> = {};
+    fingertipPressureRingsRef.current = [];
 
     fingerDefs.forEach(f => {
       const phalanxMeshes: THREE.Mesh[] = [];
@@ -1000,6 +1074,87 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
       dipJoint.add(arrow);
       forceArrowsRef.current[f.id] = arrow;
 
+      // Holographic Pressure Rings (Vòng Tròn Hiệu Ứng Phát Sáng Hologram tại Đầu Ngón Tay)
+      const ringGroup = new THREE.Group();
+      ringGroup.position.set(0, f.l3 * 0.94, f.w * 0.65);
+      dipJoint.add(ringGroup);
+
+      // 1. Inner contact disc (Holographic core)
+      const discGeo = new THREE.CircleGeometry(f.w * 0.52, 24);
+      const discMat = new THREE.MeshBasicMaterial({
+        color: 0x2ee6c8,
+        transparent: true,
+        opacity: 0.35,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const innerDisc = new THREE.Mesh(discGeo, discMat);
+      ringGroup.add(innerDisc);
+
+      // 2. Base sharp glowing ring
+      const baseRingGeo = new THREE.RingGeometry(f.w * 0.52, f.w * 0.68, 32);
+      const baseRingMat = new THREE.MeshBasicMaterial({
+        color: 0x2ee6c8,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const baseRing = new THREE.Mesh(baseRingGeo, baseRingMat);
+      ringGroup.add(baseRing);
+
+      // 3. Pulse Ring 1 (Expanding concentric ripple wave)
+      const pulse1Geo = new THREE.RingGeometry(f.w * 0.70, f.w * 0.84, 32);
+      const pulse1Mat = new THREE.MeshBasicMaterial({
+        color: 0x2ee6c8,
+        transparent: true,
+        opacity: 0.60,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const pulseRing1 = new THREE.Mesh(pulse1Geo, pulse1Mat);
+      ringGroup.add(pulseRing1);
+
+      // 4. Pulse Ring 2 (Expanding concentric ripple wave with offset phase)
+      const pulse2Geo = new THREE.RingGeometry(f.w * 0.86, f.w * 0.98, 32);
+      const pulse2Mat = new THREE.MeshBasicMaterial({
+        color: 0x2ee6c8,
+        transparent: true,
+        opacity: 0.40,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const pulseRing2 = new THREE.Mesh(pulse2Geo, pulse2Mat);
+      ringGroup.add(pulseRing2);
+
+      // 5. Holographic HUD Reticle Ring (Segmented wireframe / dashed rotation)
+      const reticleGeo = new THREE.RingGeometry(f.w * 1.02, f.w * 1.14, 20);
+      const reticleMat = new THREE.MeshBasicMaterial({
+        color: 0x2ee6c8,
+        transparent: true,
+        opacity: 0.55,
+        wireframe: true,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      });
+      const reticleRing = new THREE.Mesh(reticleGeo, reticleMat);
+      ringGroup.add(reticleRing);
+
+      fingertipPressureRingsRef.current.push({
+        fingerId: f.id,
+        group: ringGroup,
+        innerDisc,
+        baseRing,
+        pulseRing1,
+        pulseRing2,
+        reticleRing
+      });
+
       fingerGroups[f.id] = {
         mcpJoint,
         pipJoint,
@@ -1075,16 +1230,31 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
             matDisc.opacity = pulse * 0.85;
 
             // Color transition cyan -> emerald -> amber based on force
+            let contactColor = 0x2ee6c8;
             if (forceN > 25) {
-              matRing.color.setHex(0xf59e0b);
-              matDisc.color.setHex(0xf59e0b);
+              contactColor = 0xf59e0b;
             } else if (forceN > 10) {
-              matRing.color.setHex(0x10b981);
-              matDisc.color.setHex(0x10b981);
-            } else {
-              matRing.color.setHex(0x2ee6c8);
-              matDisc.color.setHex(0x2ee6c8);
+              contactColor = 0x10b981;
             }
+
+            matRing.color.setHex(contactColor);
+            matDisc.color.setHex(contactColor);
+
+            // Visual Haptic Expanding Pulse Waveform Shockwaves
+            const pulseRate = Math.min(8.0, 3.0 + (forceN / 7.0));
+            const pPhase1 = (elapsedTime * pulseRate) % 1.0;
+            const pPhase2 = (elapsedTime * pulseRate + 0.5) % 1.0;
+
+            const pMat1 = patch.pulseRing1.material as THREE.MeshBasicMaterial;
+            const pMat2 = patch.pulseRing2.material as THREE.MeshBasicMaterial;
+
+            patch.pulseRing1.scale.setScalar(1.0 + pPhase1 * 2.5);
+            pMat1.opacity = Math.max(0, (1.0 - pPhase1) * 0.85);
+            pMat1.color.setHex(contactColor);
+
+            patch.pulseRing2.scale.setScalar(1.0 + pPhase2 * 2.5);
+            pMat2.opacity = Math.max(0, (1.0 - pPhase2) * 0.85);
+            pMat2.color.setHex(contactColor);
 
             // Normal vector length scaling
             patch.arrow.setLength(0.18 + forceRatio * 0.25, 0.06, 0.035);
@@ -1101,6 +1271,97 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
           if (finger.tipPulp) {
             finger.tipPulp.scale.z += (compScaleZ - finger.tipPulp.scale.z) * 0.1;
           }
+        });
+      }
+
+      // Update 3D Holographic Fingertip Pressure Rings (Visual Feedback)
+      if (fingertipPressureRingsRef.current.length > 0) {
+        const isEnabled = showPressureRingsRef.current;
+        const currentForce = forceNRef.current;
+        const currentPressure = pressureKPaRef.current;
+        const currentTimeline = graspTimelinePctRef.current;
+        const currentObj = graspObjectRef.current;
+        const currentAngles = jointAnglesRef.current;
+        const isGrasping = (currentTimeline >= 35 || currentForce > 2.0);
+
+        fingertipPressureRingsRef.current.forEach(item => {
+          item.group.visible = isEnabled;
+          if (!isEnabled) return;
+
+          // Localized force calculation
+          let fingerWeight = 0.20;
+          if (currentObj === 'key') {
+            fingerWeight = item.fingerId === 'thumb' ? 0.52 : item.fingerId === 'index' ? 0.48 : 0.0;
+          } else if (currentObj === 'cylinder' || currentObj === 'box') {
+            const weights: Record<string, number> = { thumb: 0.32, index: 0.25, middle: 0.23, ring: 0.14, pinky: 0.06 };
+            fingerWeight = weights[item.fingerId] ?? 0.2;
+          } else if (currentObj === 'sphere') {
+            const weights: Record<string, number> = { thumb: 0.28, index: 0.22, middle: 0.24, ring: 0.16, pinky: 0.10 };
+            fingerWeight = weights[item.fingerId] ?? 0.2;
+          }
+
+          const curl = currentAngles[item.fingerId as keyof JointAngles] ?? 0.2;
+          const isEngaged = isGrasping && fingerWeight > 0;
+          const localForce = isEngaged ? currentForce * fingerWeight : (curl > 0.4 ? curl * 3.5 : 0.6);
+
+          // Dynamic color determination based on local force/pressure intensity
+          let colorHex = 0x2ee6c8; // Cyan (< 6N, delicate/idle)
+          let pulseSpeed = 2.5;
+          let baseOpacity = 0.5;
+
+          if (localForce >= 35.0) {
+            // ISO/TS 15066 safety overload - Rapid flashing crimson red!
+            const flash = Math.sin(elapsedTime * 18.0) > 0;
+            colorHex = flash ? 0xef4444 : 0xff1744;
+            pulseSpeed = 12.0;
+            baseOpacity = 0.95;
+          } else if (localForce >= 28.0) {
+            colorHex = 0xf97316; // Neon Orange (28 - 35N, high pressure)
+            pulseSpeed = 8.5;
+            baseOpacity = 0.85;
+          } else if (localForce >= 16.0) {
+            colorHex = 0xf59e0b; // Amber Gold (16 - 28N, firm grasp)
+            pulseSpeed = 6.0;
+            baseOpacity = 0.75;
+          } else if (localForce >= 6.0) {
+            colorHex = 0x10b981; // Bio Emerald Green (6 - 16N, optimal secure grasp)
+            pulseSpeed = 4.0;
+            baseOpacity = 0.65;
+          } else {
+            colorHex = 0x2ee6c8; // Cyan (0 - 6N, light touch / baseline)
+            pulseSpeed = 2.5;
+            baseOpacity = 0.45;
+          }
+
+          // Hertzian Contact Patch Dynamic Radial Expansion (area expands with load)
+          const compressionFactor = Math.min(2.1, 0.9 + Math.pow(Math.max(0, localForce) / 8.0, 0.6) * 0.55);
+          item.baseRing.scale.setScalar(compressionFactor);
+          item.innerDisc.scale.setScalar(compressionFactor);
+
+          // Apply colors to all components
+          (item.innerDisc.material as THREE.MeshBasicMaterial).color.setHex(colorHex);
+          (item.innerDisc.material as THREE.MeshBasicMaterial).opacity = baseOpacity * 0.45;
+
+          (item.baseRing.material as THREE.MeshBasicMaterial).color.setHex(colorHex);
+          (item.baseRing.material as THREE.MeshBasicMaterial).opacity = baseOpacity;
+
+          // Expanding concentric ripple waves (Pacinian vibrotactile shockwaves)
+          const phase1 = (elapsedTime * pulseSpeed) % 1.0;
+          const phase2 = (elapsedTime * pulseSpeed + 0.5) % 1.0;
+
+          item.pulseRing1.scale.setScalar(compressionFactor * (1.0 + phase1 * 0.9));
+          (item.pulseRing1.material as THREE.MeshBasicMaterial).color.setHex(colorHex);
+          (item.pulseRing1.material as THREE.MeshBasicMaterial).opacity = (1.0 - phase1) * baseOpacity * 0.8;
+
+          item.pulseRing2.scale.setScalar(compressionFactor * (1.0 + phase2 * 0.9));
+          (item.pulseRing2.material as THREE.MeshBasicMaterial).color.setHex(colorHex);
+          (item.pulseRing2.material as THREE.MeshBasicMaterial).opacity = (1.0 - phase2) * baseOpacity * 0.6;
+
+          // Reticle HUD ring slow rotation
+          item.reticleRing.rotation.z += 0.015 + (localForce * 0.001);
+          item.reticleRing.scale.setScalar(compressionFactor);
+          (item.reticleRing.material as THREE.MeshBasicMaterial).color.setHex(colorHex);
+          (item.reticleRing.material as THREE.MeshBasicMaterial).opacity = baseOpacity * 0.65;
         });
       }
 
@@ -1128,26 +1389,51 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
 
     animate();
 
-    // 9. Resize handler
+    // 9. Resize handler (Throttled using requestAnimationFrame to prevent 'ResizeObserver loop completed with undelivered notifications')
+    let resizeRafId: number | null = null;
     const handleResize = () => {
-      if (!container || !rendererRef.current || !cameraRef.current) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      cameraRef.current.aspect = w / h;
-      cameraRef.current.updateProjectionMatrix();
-      rendererRef.current.setSize(w, h);
+      if (resizeRafId !== null) {
+        cancelAnimationFrame(resizeRafId);
+      }
+      resizeRafId = requestAnimationFrame(() => {
+        if (!container || !rendererRef.current || !cameraRef.current) return;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (w === 0 || h === 0) return;
+        cameraRef.current.aspect = w / h;
+        cameraRef.current.updateProjectionMatrix();
+        rendererRef.current.setSize(w, h, false);
+      });
     };
 
-    const resizeObserver = new ResizeObserver(handleResize);
+    const resizeObserver = new ResizeObserver(() => {
+      handleResize();
+    });
     resizeObserver.observe(container);
 
     // Cleanup
     return () => {
       cancelAnimationFrame(animId);
+      if (resizeRafId !== null) {
+        cancelAnimationFrame(resizeRafId);
+      }
       resizeObserver.disconnect();
       if (rendererRef.current?.domElement && container.contains(rendererRef.current.domElement)) {
         container.removeChild(rendererRef.current.domElement);
       }
+      fingertipPressureRingsRef.current.forEach(item => {
+        item.innerDisc.geometry.dispose();
+        (item.innerDisc.material as THREE.Material).dispose();
+        item.baseRing.geometry.dispose();
+        (item.baseRing.material as THREE.Material).dispose();
+        item.pulseRing1.geometry.dispose();
+        (item.pulseRing1.material as THREE.Material).dispose();
+        item.pulseRing2.geometry.dispose();
+        (item.pulseRing2.material as THREE.Material).dispose();
+        item.reticleRing.geometry.dispose();
+        (item.reticleRing.material as THREE.Material).dispose();
+      });
+      fingertipPressureRingsRef.current = [];
       rendererRef.current?.dispose();
     };
   }, [currentMode, autoRotate, graspObject, populateObjectGroup]);
@@ -1818,6 +2104,58 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
     ];
   }, [graspObject, graspTimelinePct, forceN]);
 
+  // 5-Fingertip Localized Pressure & Holographic Ring Metrics
+  const fingertipPressures = useMemo(() => {
+    const isGrasping = graspObject !== 'none' && (graspTimelinePct >= 35 || forceN > 2.0);
+    const fingers = [
+      { id: 'thumb', name: 'Cái', weight: graspObject === 'key' ? 0.52 : 0.30 },
+      { id: 'index', name: 'Trỏ', weight: graspObject === 'key' ? 0.48 : 0.25 },
+      { id: 'middle', name: 'Giữa', weight: graspObject === 'key' ? 0.0 : 0.23 },
+      { id: 'ring', name: 'Áp Út', weight: graspObject === 'key' ? 0.0 : 0.14 },
+      { id: 'pinky', name: 'Út', weight: graspObject === 'key' ? 0.0 : 0.08 }
+    ];
+
+    return fingers.map(f => {
+      const curl = jointAngles[f.id as keyof JointAngles] ?? 0.2;
+      const isEngaged = isGrasping && f.weight > 0;
+      const localForce = isEngaged ? forceN * f.weight : (curl > 0.4 ? curl * 3.5 : 0.6);
+      const localPressure = isEngaged ? pressureKPa * (f.weight / 0.25) : localForce * 4.2;
+
+      let color = '#2ee6c8'; // Cyan
+      let statusText = 'Chạm nhẹ (Nhàn rỗi)';
+      let level: 'low' | 'opt' | 'firm' | 'high' | 'danger' = 'low';
+
+      if (localForce >= 35.0) {
+        color = '#ef4444'; // Red
+        statusText = 'Quá tải (ISO 15066)';
+        level = 'danger';
+      } else if (localForce >= 28.0) {
+        color = '#f97316'; // Orange
+        statusText = 'Áp suất cao';
+        level = 'high';
+      } else if (localForce >= 16.0) {
+        color = '#f59e0b'; // Amber
+        statusText = 'Lực siết chặt';
+        level = 'firm';
+      } else if (localForce >= 6.0) {
+        color = '#10b981'; // Green
+        statusText = 'Kẹp an toàn';
+        level = 'opt';
+      }
+
+      return {
+        id: f.id,
+        name: f.name,
+        forceN: localForce,
+        pressureKPa: localPressure,
+        color,
+        statusText,
+        level,
+        isEngaged
+      };
+    });
+  }, [jointAngles, forceN, pressureKPa, graspObject, graspTimelinePct]);
+
   return (
     <div
       className={`${
@@ -1879,6 +2217,33 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
               }`}
             >
               <Crosshair className="w-3 h-3" /> Vector Lực 3D
+            </button>
+
+            {/* Holographic Pressure Rings Toggle */}
+            <button
+              onClick={() => setShowPressureRings(!showPressureRings)}
+              title="Bật/tắt vòng tròn hiệu ứng phát sáng holographic hiển thị áp suất cục bộ tại 5 đầu ngón tay"
+              className={`px-2 py-1 text-[10.5px] font-mono rounded border flex items-center gap-1 transition-all ${
+                showPressureRings
+                  ? 'bg-gradient-to-r from-[#2ee6c8]/25 to-[#38bdf8]/25 border-[#2ee6c8] text-[#2ee6c8] font-bold shadow-sm shadow-[#2ee6c8]/20'
+                  : 'bg-[#09101f]/80 border-white/10 text-slate-400 hover:text-white'
+              }`}
+            >
+              <CircleDot className={`w-3 h-3 ${showPressureRings ? 'text-[#2ee6c8] animate-pulse' : 'text-slate-400'}`} />
+              Vòng Áp Suất Hologram: {showPressureRings ? 'BẬT' : 'TẮT'}
+            </button>
+
+            {/* Visual Haptic Feedback Overlay Toggle */}
+            <button
+              onClick={() => setShowHapticHUD(!showHapticHUD)}
+              title="Bật/tắt bảng chỉ báo xúc giác Haptic Feedback và xung áp suất"
+              className={`px-2 py-1 text-[10.5px] font-mono rounded border flex items-center gap-1 transition-all ${
+                showHapticHUD
+                  ? 'bg-[#2ee6c8]/25 border-[#2ee6c8] text-[#2ee6c8] font-bold shadow-sm'
+                  : 'bg-[#09101f]/80 border-white/10 text-slate-400 hover:text-white'
+              }`}
+            >
+              <Zap className="w-3 h-3 text-amber-300" /> Chỉ Báo Haptic: {showHapticHUD ? 'BẬT' : 'TẮT'}
             </button>
 
             {/* IK Snap Button */}
@@ -2199,6 +2564,172 @@ export const Hand3DCanvas: React.FC<Hand3DCanvasProps> = ({
 
       {/* 3D WebGL Canvas Container */}
       <div ref={mountRef} className="w-full flex-1 cursor-grab active:cursor-grabbing" />
+
+      {/* Visual Haptic Feedback Overlay on Canvas */}
+      <HapticFeedbackOverlay
+        forceN={forceN}
+        pressureKPa={pressureKPa}
+        isGrasping={isObjectPresent && (graspTimelinePct >= 35 || forceN > 2.0)}
+        graspObject={graspObject}
+        jointAngles={jointAngles}
+        visible={showHapticHUD}
+        onToggleVisible={() => setShowHapticHUD(!showHapticHUD)}
+        onApplyForce={onForceChange}
+      />
+
+      {/* Holographic Pressure Rings Visual Feedback HUD */}
+      {showPressureRings && (
+        <div className="absolute top-20 right-3 z-30 w-72 sm:w-80 bg-[#060c18]/92 border border-[#2ee6c8]/40 rounded-xl p-3 shadow-2xl backdrop-blur-md font-mono pointer-events-auto transition-all animate-in fade-in slide-in-from-right-3">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-white/10">
+            <div className="flex items-center gap-1.5">
+              <CircleDot className="w-4 h-4 text-[#2ee6c8] animate-pulse" />
+              <div>
+                <span className="text-[11px] font-bold text-transparent bg-clip-text bg-gradient-to-r from-[#2ee6c8] to-[#38bdf8] uppercase tracking-wider block">
+                  VÒNG ÁP SUẤT HOLOGRAPHIC
+                </span>
+                <span className="text-[8.5px] text-slate-400 block">
+                  Visual Feedback Áp Suất 5 Đầu Ngón Tay
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsPressureHUDCollapsed(!isPressureHUDCollapsed)}
+              className="text-slate-400 hover:text-white text-[10px] px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 transition-colors flex items-center gap-1"
+              title={isPressureHUDCollapsed ? "Mở rộng bảng áp suất" : "Thu gọn"}
+            >
+              {isPressureHUDCollapsed ? (
+                <>
+                  <ChevronDown className="w-3 h-3" />
+                  <span>Mở</span>
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="w-3 h-3" />
+                  <span>Thu</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Collapsed Compact View */}
+          {isPressureHUDCollapsed ? (
+            <div className="flex items-center justify-between gap-1 py-0.5">
+              <div className="flex items-center gap-1.5">
+                {fingertipPressures.map(fp => (
+                  <div key={fp.id} className="flex flex-col items-center">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full border border-white/40 shadow-sm transition-all duration-300"
+                      style={{
+                        backgroundColor: fp.color,
+                        boxShadow: `0 0 6px ${fp.color}`
+                      }}
+                      title={`Ngón ${fp.name}: ${fp.forceN.toFixed(1)}N (${fp.pressureKPa.toFixed(0)} kPa)`}
+                    />
+                    <span className="text-[7.5px] text-slate-400 mt-0.5">{fp.name}</span>
+                  </div>
+                ))}
+              </div>
+              <span className="text-[10px] font-bold text-[#2ee6c8] tabular-nums">
+                {forceN.toFixed(1)} N / {pressureKPa.toFixed(0)} kPa
+              </span>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {/* 5 Finger Gauge Bars */}
+              <div className="space-y-1.5">
+                {fingertipPressures.map(fp => (
+                  <div key={fp.id} className="bg-black/40 border border-white/5 rounded-lg p-1.5 flex flex-col gap-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full border border-white/40 shadow-sm transition-colors duration-300"
+                          style={{
+                            backgroundColor: fp.color,
+                            boxShadow: `0 0 8px ${fp.color}`
+                          }}
+                        />
+                        <span className="font-bold text-slate-200">Ngón {fp.name}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-right">
+                        <span className="font-bold tabular-nums" style={{ color: fp.color }}>
+                          {fp.forceN.toFixed(1)} N
+                        </span>
+                        <span className="text-[9px] text-slate-400 tabular-nums">
+                          {fp.pressureKPa.toFixed(0)} kPa
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Dynamic Bar */}
+                    <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.max(8, (fp.forceN / 40) * 100))}%`,
+                          backgroundColor: fp.color,
+                          boxShadow: `0 0 6px ${fp.color}`
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Color Legend Scale */}
+              <div className="pt-1.5 border-t border-white/10 flex flex-col gap-1">
+                <span className="text-[8.5px] text-slate-400 uppercase tracking-wider font-semibold">
+                  Thang Màu Quang Phổ Lực (Color Spectrum):
+                </span>
+                <div className="grid grid-cols-5 gap-1 text-[7.5px] text-center font-bold">
+                  <div className="bg-[#2ee6c8]/15 border border-[#2ee6c8]/40 text-[#2ee6c8] p-0.5 rounded">
+                    &lt; 6N Lam
+                  </div>
+                  <div className="bg-[#10b981]/15 border border-[#10b981]/40 text-[#10b981] p-0.5 rounded">
+                    6-16N Xanh
+                  </div>
+                  <div className="bg-[#f59e0b]/15 border border-[#f59e0b]/40 text-[#f59e0b] p-0.5 rounded">
+                    16-28N Vàng
+                  </div>
+                  <div className="bg-[#f97316]/15 border border-[#f97316]/40 text-[#f97316] p-0.5 rounded">
+                    28-35N Cam
+                  </div>
+                  <div className="bg-[#ef4444]/15 border border-[#ef4444]/40 text-[#ef4444] p-0.5 rounded animate-pulse">
+                    &gt; 35N Đỏ
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Test Force Levels */}
+              {onForceChange && (
+                <div className="pt-1.5 border-t border-white/10 flex items-center justify-between gap-1">
+                  <span className="text-[8.5px] text-slate-400">Thử Lực:</span>
+                  <div className="flex gap-1">
+                    {[
+                      { label: '4N (Lam)', val: 4 },
+                      { label: '12N (Xanh)', val: 12 },
+                      { label: '22N (Vàng)', val: 22 },
+                      { label: '30N (Cam)', val: 30 },
+                      { label: '38N (Đỏ)', val: 38 }
+                    ].map(preset => (
+                      <button
+                        key={preset.val}
+                        onClick={() => onForceChange(preset.val)}
+                        className={`px-1.5 py-0.5 text-[8.5px] rounded font-bold transition-all ${
+                          Math.abs(forceN - preset.val) < 2
+                            ? 'bg-[#2ee6c8] text-black shadow-sm'
+                            : 'bg-white/5 hover:bg-white/10 text-slate-300'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Overlay telemetry badges */}
       <div className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-2 pointer-events-none">

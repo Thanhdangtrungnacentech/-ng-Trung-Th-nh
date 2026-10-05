@@ -4,9 +4,11 @@ import { ColabNotebook } from './components/ColabNotebook';
 import { EMGOscilloscope } from './components/EMGOscilloscope';
 import { EvaluationDashboard } from './components/EvaluationDashboard';
 import { DatasetInspector } from './components/DatasetInspector';
-import { ArchitectureModal } from './components/ArchitectureModal';
+import { ArchitectureModal, ArchitectureView } from './components/ArchitectureModal';
 import { Layer2EdgeAI } from './components/Layer2EdgeAI';
-import { JointAngles, ModelMetrics, GraspSample, EMGSample, TabularSample, RenderMode } from './types';
+import { HumanInteractionSimulator } from './components/HumanInteractionSimulator';
+import { StandaloneHtmlPreview } from './components/StandaloneHtmlPreview';
+import { JointAngles, ModelMetrics, GraspSample, EMGSample, TabularSample, RenderMode, GraspObjectType } from './types';
 import { BENCHMARK_MODELS, predictGraspSuccess, sampleToJointAngles, getAllGraspSamples, getAllEMGSamples, getAllTabularSamples } from './data/dataset';
 import {
   Cpu,
@@ -22,7 +24,10 @@ import {
   AlertTriangle,
   Zap,
   RotateCcw,
-  ShieldCheck
+  ShieldCheck,
+  Users,
+  Hand,
+  Monitor
 } from 'lucide-react';
 
 export default function App() {
@@ -44,7 +49,8 @@ export default function App() {
   const [activeStage, setActiveStage] = useState<string>('setup');
   const [selectedModelKey, setSelectedModelKey] = useState<string>('xgboost_regularized');
   const [metrics, setMetrics] = useState<ModelMetrics>(BENCHMARK_MODELS.xgboost_regularized);
-  const [activeTab, setActiveTab] = useState<'layer2' | 'notebook' | 'eval' | 'dataset'>('layer2');
+  const [activeTab, setActiveTab] = useState<'interaction' | 'layer2' | 'notebook' | 'eval' | 'dataset' | 'architecture' | 'standalone_html'>('interaction');
+  const [currentGraspObject, setCurrentGraspObject] = useState<GraspObjectType>('cylinder');
   const [selectedSampleId, setSelectedSampleId] = useState<string>('GRASP_0000');
   const [showArchModal, setShowArchModal] = useState<boolean>(false);
 
@@ -248,6 +254,32 @@ export default function App() {
               <BookOpen className="w-3.5 h-3.5 text-[#a06bff]" />
               <span className="hidden sm:inline">Kiến Trúc 4 Tầng &amp; Tối Ưu Hóa ML</span>
             </button>
+
+            {/* In-App HTML UI/UX Preview Switcher */}
+            <button
+              onClick={() => setActiveTab('standalone_html')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                activeTab === 'standalone_html'
+                  ? 'bg-[#2ee6c8] text-black shadow-md shadow-[#2ee6c8]/30 font-bold'
+                  : 'bg-white/5 hover:bg-white/10 border border-[#2ee6c8]/40 text-[#2ee6c8] hover:text-white'
+              }`}
+              title="Chạy xem trước trực tiếp gói HTML standalone ngay trong ứng dụng"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              <span>Xem Trước HTML UI/UX</span>
+            </button>
+
+            {/* Standalone HTML Demo Link (Open In New Tab) */}
+            <a
+              href="/standalone-demo.html"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-[#2ee6c8] to-[#38bdf8] text-black font-bold hover:opacity-95 transition-all text-xs shadow-md shadow-[#2ee6c8]/30"
+              title="Mở gói HTML Standalone Demo ở cửa sổ/tab mới"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Tab HTML Độc Lập</span>
+            </a>
           </div>
         </div>
       </header>
@@ -267,6 +299,8 @@ export default function App() {
                 renderMode={renderMode}
                 onJointsChange={setJointAngles}
                 onForceChange={setForceN}
+                currentGraspObject={currentGraspObject}
+                onGraspObjectChange={setCurrentGraspObject}
               />
             </div>
 
@@ -395,6 +429,16 @@ export default function App() {
             <div className="bg-[#09101f] border border-[#38bdf8]/30 rounded-xl p-1.5 flex items-center justify-between flex-wrap gap-2">
               <div className="flex gap-1 text-xs overflow-x-auto">
                 <button
+                  onClick={() => setActiveTab('interaction')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap ${
+                    activeTab === 'interaction'
+                      ? 'bg-gradient-to-r from-[#2ee6c8] to-[#38bdf8] text-black shadow-md shadow-[#2ee6c8]/30'
+                      : 'text-slate-300 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" /> 🤝 Thao Tác Với Người Dùng
+                </button>
+                <button
                   onClick={() => setActiveTab('layer2')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap ${
                     activeTab === 'layer2'
@@ -412,17 +456,17 @@ export default function App() {
                       : 'text-slate-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
-                  <Code2 className="w-3.5 h-3.5" /> Colab ML Notebook (13 Cell)
+                  <Code2 className="w-3.5 h-3.5" /> Colab ML Notebook (14 Cell)
                 </button>
                 <button
                   onClick={() => setActiveTab('eval')}
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap ${
                     activeTab === 'eval'
-                      ? 'bg-[#2ee6c8] text-black shadow-md shadow-[#2ee6c8]/20'
+                      ? 'bg-gradient-to-r from-[#2ee6c8] to-[#38bdf8] text-black shadow-md shadow-[#2ee6c8]/20'
                       : 'text-slate-400 hover:text-white hover:bg-white/5'
                   }`}
                 >
-                  <Activity className="w-3.5 h-3.5" /> Đánh Giá &amp; Tối Ưu Hóa
+                  <Activity className="w-3.5 h-3.5" /> Đánh Giá &amp; Tối Ưu Bão Hòa
                 </button>
                 <button
                   onClick={() => setActiveTab('dataset')}
@@ -441,15 +485,52 @@ export default function App() {
                   )}
                   )
                 </button>
+                <button
+                  onClick={() => setActiveTab('architecture')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap ${
+                    activeTab === 'architecture'
+                      ? 'bg-[#a06bff] text-white shadow-md shadow-[#a06bff]/30'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <BookOpen className="w-3.5 h-3.5" /> 🏛 Kiến Trúc 4 Tầng
+                </button>
+                <button
+                  onClick={() => setActiveTab('standalone_html')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold transition-all whitespace-nowrap ${
+                    activeTab === 'standalone_html'
+                      ? 'bg-gradient-to-r from-[#2ee6c8] to-[#38bdf8] text-black shadow-md shadow-[#2ee6c8]/30'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Monitor className="w-3.5 h-3.5" /> 🌐 Xem Trước Gói HTML UI/UX
+                </button>
               </div>
 
               <div className="text-[11px] text-slate-400 hidden sm:block pr-2">
-                Đang chạy: <span className="text-[#38bdf8] font-bold">{activeTab === 'layer2' ? 'STM32F4 / FreeRTOS 100Hz' : selectedModelKey}</span>
+                Đang chạy: <span className="text-[#38bdf8] font-bold">{activeTab === 'interaction' ? 'Human-Robot Collaboration' : activeTab === 'layer2' ? 'STM32F4 / FreeRTOS 100Hz' : activeTab === 'architecture' ? '4-Tier Biomimetic Robotics Architecture' : activeTab === 'standalone_html' ? 'Single-File HTML Simulation (Zero-Server)' : selectedModelKey}</span>
               </div>
             </div>
 
             {/* Tab Workspace Panels */}
             <div className="flex-1 flex flex-col">
+              {activeTab === 'interaction' && (
+                <HumanInteractionSimulator
+                  currentJointAngles={jointAngles}
+                  onApplyJoints={(angles, force, pressure, logMsg) => {
+                    setJointAngles(angles);
+                    if (force !== undefined) setForceN(force);
+                    if (pressure !== undefined) setPressureKPa(pressure);
+                    if (logMsg) addLog(logMsg, 'magic');
+                  }}
+                  currentForceN={forceN}
+                  currentPressureKPa={pressureKPa}
+                  currentGraspObject={currentGraspObject}
+                  onSelectGraspObject={setCurrentGraspObject}
+                  onLogMessage={addLog}
+                />
+              )}
+
               {activeTab === 'layer2' && (
                 <Layer2EdgeAI
                   jointAngles={jointAngles}
@@ -505,6 +586,14 @@ export default function App() {
                   onResetSamples={handleResetSamples}
                   onLogMessage={addLog}
                 />
+              )}
+
+              {activeTab === 'architecture' && (
+                <ArchitectureView />
+              )}
+
+              {activeTab === 'standalone_html' && (
+                <StandaloneHtmlPreview />
               )}
             </div>
           </div>
